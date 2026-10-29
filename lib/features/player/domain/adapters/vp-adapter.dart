@@ -1,0 +1,226 @@
+import 'dart:async';
+import 'package:Self.Tube/common/ui/global_snackbar.dart';
+import 'package:flutter/material.dart';
+import 'package:video_player/video_player.dart';
+import '../video_player_interface.dart';
+import 'package:Self.Tube/app/logging/talker.dart';
+
+class VideoPlayerAdapter implements MediaPlayer {
+  final VideoPlayerController _controller;
+
+  final _positionController = StreamController<Duration>.broadcast();
+  final _playingController = StreamController<bool>.broadcast();
+  final _bufferingController = StreamController<bool>.broadcast();
+
+  Timer? _pollTimer;
+
+  Duration? _lastPosition;
+  bool? _lastPlaying;
+  bool? _lastBuffering;
+
+  bool _disposed = false;
+
+  late final Future<void> _initialized;
+  final ValueNotifier<bool> _repeatNotifier = ValueNotifier(false);
+  final ValueNotifier<BorderMode> _borderModeNotifier = ValueNotifier(BorderMode.contain);
+  final ValueNotifier<PlaybackSpeed> _speedNotifier = ValueNotifier(PlaybackSpeed.x1_0);
+
+  VideoPlayerAdapter(String url, {Map<String, String>? headers})
+      : _controller = VideoPlayerController.networkUrl(
+          Uri.parse(url),
+          httpHeaders: headers ?? const {},
+        ) {
+    _initialized = _controller.initialize().then((_) {
+      if (!_controller.value.isInitialized) return;
+
+      talker.log("EXO: Received Playback Job");
+
+      final value = _controller.value;
+      
+      //temporary fix to resolve video/audio desync
+      safeSeek(duration);
+      safeSeek(Duration(seconds: 0));
+
+      _lastPlaying = value.isPlaying;
+      _lastPosition = value.position;
+      _lastBuffering = value.isBuffering;
+
+      _playingController.add(_lastPlaying!);
+      _positionController.add(_lastPosition!);
+     
+      _controller.play();
+
+      _pollTimer = Timer.periodic(
+        const Duration(milliseconds: 400),
+        _pollController,
+      );
+    }).catchError((e){
+      talker.error("ExoPlayer Error: $e");
+      GlobalSnackbar.show(
+        e.toString(),
+        icon: Icons.error_outline,
+        iconColor: Colors.red,
+        autoDismiss: false
+      );
+    });
+  }
+
+  void _pollController(Timer timer) {
+    if (_disposed) return;
+
+    final value = _controller.value;
+    if (!value.isInitialized) return;
+
+    if (value.isBuffering != _lastBuffering) {
+      _lastBuffering = value.isBuffering;
+      _bufferingController.add(value.isBuffering);
+    }
+
+    if (value.hasError) {
+      talker.error("EXO: ${value.errorDescription}");
+    }
+
+    if (value.isPlaying != _lastPlaying) {
+      _lastPlaying = value.isPlaying;
+      _playingController.add(value.isPlaying);
+    }
+
+    if (value.position != _lastPosition) {
+      _lastPosition = value.position;
+      _positionController.add(value.position);
+    }
+  }
+
+  @override
+  Widget buildView() {
+    return FutureBuilder(
+      future: _initialized, 
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return CircularProgressIndicator();
+        }
+        return ValueListenableBuilder<BorderMode>(
+          valueListenable: _borderModeNotifier,
+          builder: (context, mode, _) {
+            if (!_controller.value.isInitialized) {
+              return const Text("Player não inicializado");
+            }
+
+            final size = _controller.value.size;
+
+            return SizedBox.expand(
+              child: FittedBox(
+                fit: _mapBorderMode(mode),
+                child: SizedBox(
+                  width: size.width,
+                  height: size.height,
+                  child: VideoPlayer(_controller),
+                ),
+              ),
+            );
+          },
+        );
+      }
+    );
+  }
+
+  BoxFit _mapBorderMode(BorderMode mode) {
+    switch (mode) {
+      case BorderMode.contain:
+        return BoxFit.contain;
+      case BorderMode.cover:
+        return BoxFit.cover;
+      case BorderMode.stretch:
+        return BoxFit.fill;
+    }
+  }
+
+
+  @override 
+  Future<void> get initialized => _initialized;
+
+  @override
+  Duration get position => _controller.value.position;
+
+  @override
+  Duration get duration => _controller.value.duration;
+
+  @override
+  Future<void> play() => _controller.play();
+
+  @override
+  Future<void> pause() => _controller.pause();
+
+  @override
+  String backend() => "EXO";
+
+  @override
+  Stream<bool> get isBuffering => _bufferingController.stream;
+
+  @override
+  Duration get buffered => _controller.value.buffered.last.end;
+  
+  @override
+  Size get size => _controller.value.size;
+
+  @override
+  Future<void> seek(Duration position) async {
+    if (position < Duration.zero) {
+      return safeSeek(Duration.zero);
+    } else if (position > duration) {
+      return safeSeek(duration);
+    } else {
+      return safeSeek(position);
+    }
+  }
+
+  Future<void> safeSeek(Duration position) async {
+    _controller.pause();
+    _controller.seekTo(position);
+    _controller.play();
+  }
+
+  @override
+  Stream<Duration> get positionStream => _positionController.stream;
+
+  @override
+  Stream<bool> get playingStream => _playingController.stream;
+
+  @override
+  bool get isPlaying => _controller.value.isPlaying;
+
+  @override 
+  ValueNotifier<bool> get repeatNotifier => _repeatNotifier;
+
+  @override
+  Future<void> setRepeat(bool value) async {
+    _controller.setLooping(value);
+    _repeatNotifier.value = value;
+  }
+
+  @override 
+  ValueNotifier<BorderMode> get borderModeNotifier => _borderModeNotifier; 
+  
+  @override 
+  Future<void> setBorderMode(BorderMode mode) async { 
+    _borderModeNotifier.value = mode; 
+  } 
+
+  @override
+  ValueNotifier<PlaybackSpeed> get speedNotifier => _speedNotifier;
+
+  @override
+  Future<void> setPlaybackSpeed(PlaybackSpeed speed) async {
+    _speedNotifier.value = speed;
+    await _controller.setPlaybackSpeed(speed.value);
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _pollTimer?.cancel();
+    _controller.dispose();
+    _positionController.close();
+    _playingController.close();
+  }
+}

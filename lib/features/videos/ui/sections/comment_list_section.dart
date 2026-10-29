@@ -1,0 +1,108 @@
+import 'package:Self.Tube/common/ui/widgets/sections/empty_error_section.dart';
+import 'package:Self.Tube/features/videos/data/api/comment_api.dart';
+import 'package:Self.Tube/features/videos/data/models/commentlist_model.dart';
+import 'package:Self.Tube/features/videos/ui/tiles/comment_list_tile.dart';
+import 'package:flutter/material.dart';
+import 'package:Self.Tube/l10n/generated/app_localizations.dart';
+
+
+class CommentListWidget extends StatefulWidget {
+  final String videoId;
+
+  const CommentListWidget({super.key, required this.videoId});
+
+  @override
+  State<CommentListWidget> createState() => _CommentListWidgetState();
+}
+
+class _CommentListWidgetState extends State<CommentListWidget> {
+  late Future<CommentListModel?> _commentsFuture;
+  final Map<String, bool> _expandedMap = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _commentsFuture = CommentApi().fetchCommentList(widget.videoId);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context)!;
+    return FutureBuilder<CommentListModel?>(
+      future: _commentsFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const SliverToBoxAdapter(
+            child: Center(
+              child: CircularProgressIndicator()
+            )
+          );
+        } else if (snapshot.hasError) {
+          return SliverToBoxAdapter(
+            child: EmptyErrorSection()
+          );
+        }
+        
+        final data = snapshot.data!;
+        final comments = snapshot.data!.data;
+        
+        if (data.error != null || comments == null || comments.isEmpty) {
+          return SliverToBoxAdapter(
+            child: Center(child: Text(localizations.errorNoDataFound)
+            )
+          );
+        }
+        
+        return SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (context, index) {
+              final comment = comments[index];
+              final isExpanded = _expandedMap[comment.commentId] ?? false;
+              final hasReplies = comment.commentReplies.isNotEmpty;
+              
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CommentListTile(
+                    commentAuthor: comment.commentAuthor,
+                    commentText: comment.commentText,
+                    commentAuthorIsUploader: comment.commentAuthorIsUploader,
+                    commentHasReplys: hasReplies,
+                    commentLikeCount: comment.commentLikeCount,
+                    commentIsExpanded: isExpanded,
+                    commentAuthorThumbnail: comment.commentAuthorThumbnail,
+                    onPressed: () {
+                      setState(() {
+                        _expandedMap[comment.commentId] = !isExpanded;
+                      });
+                    }
+                  ),
+                  if (isExpanded)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 16.0),
+                      child: Column(
+                        children: comment.commentReplies.map((reply) {
+                          return CommentListTile(
+                            commentAuthor: reply.commentAuthor,
+                            commentText: reply.commentText,
+                            commentAuthorIsUploader: reply.commentAuthorIsUploader,
+                            commentLikeCount: reply.commentLikeCount,
+                            onPressed: () {
+                              setState(() {
+                                _expandedMap[comment.commentId] = !isExpanded;
+                              });
+                            }
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                ],
+              );
+            },
+            childCount: comments.length
+          ),
+        );
+      },
+    );
+  }
+}

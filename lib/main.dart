@@ -1,0 +1,63 @@
+import 'dart:io';
+import 'package:Self.Tube/app/navigation/app_navigation.dart';
+import 'package:Self.Tube/common/data/services/api/http_overries.dart';
+import 'package:Self.Tube/common/data/services/device/device_service.dart';
+import 'package:Self.Tube/common/data/services/settings/settings_service.dart';
+import 'package:Self.Tube/common/theme/theme.dart';
+import 'package:Self.Tube/common/theme/theme_helper.dart';
+import 'package:Self.Tube/common/ui/global_snackbar.dart';
+import 'package:Self.Tube/features/player/domain/video_player_service.dart';
+import 'package:flutter/material.dart';
+import 'package:dynamic_color/dynamic_color.dart';
+import 'package:Self.Tube/l10n/generated/app_localizations.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:Self.Tube/app/logging/talker.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  talker.info("Starting App");
+  try {
+    await SettingsService.load();
+    HttpOverrides.global = AppHttpOverrides();
+    VideoPlayerService.init();
+    await DeviceService.init();
+    runApp(
+      const ProviderScope(
+        child: MyApp()
+      )
+    );
+    talker.info("App Started");
+  } catch (e, st){
+    talker.handle(e, st, "App failed to start");
+  }
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return DynamicColorBuilder(
+      builder: (lightDynamic, darkDynamic) {
+        return MaterialApp(
+          navigatorKey: AppRouter.navigatorKey, 
+          scaffoldMessengerKey: GlobalSnackbar.key,
+          locale: const Locale('pt', 'BR'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          title: 'GuriTube',
+          theme: lightThemeFrom(
+            ThemeHelper.resolveColorScheme(isDark: false, dynamicScheme: lightDynamic),
+          ),
+          darkTheme: darkThemeFrom(
+            ThemeHelper.resolveColorScheme(isDark: true, dynamicScheme: darkDynamic),
+          ),
+          initialRoute: SettingsService.doneSetup == true
+              ? AppRouter.home
+              : AppRouter.onboarding,
+          onGenerateRoute: AppRouter.onGenerateRoute,
+        );
+      },
+    );
+  }
+}

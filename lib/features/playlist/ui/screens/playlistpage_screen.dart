@@ -1,0 +1,116 @@
+import 'package:Self.Tube/common/ui/widgets/dialogs/confirmation_dialog.dart';
+import 'package:Self.Tube/common/ui/widgets/media/custom_network_image.dart';
+import 'package:Self.Tube/features/onboarding/domain/user_session.dart';
+import 'package:Self.Tube/features/player/ui/tiles/mini_player_tile.dart';
+import 'package:Self.Tube/features/playlist/domain/playlistpage_provider.dart';
+import 'package:Self.Tube/features/playlist/ui/sheets/playlist_list_bottomsheet.dart';
+import 'package:Self.Tube/features/videos/domain/videolist_provider.dart';
+import 'package:Self.Tube/features/videos/ui/sections/video_list_section.dart';
+import 'package:flutter/material.dart';
+import 'package:Self.Tube/l10n/generated/app_localizations.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+class PlaylistpageScreen extends ConsumerWidget{
+  final String playlistId;
+
+  const PlaylistpageScreen({
+    super.key,
+    required this.playlistId
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final localizations = AppLocalizations.of(context)!;
+
+    final provider = ref.read(playlistPageProvider(playlistId).notifier);
+    final playlist = ref.watch(playlistPageProvider(playlistId));
+    final query = "&playlist=$playlistId";
+  
+    return playlist.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (error, stack) => Center(child: Text(localizations.errorFailedToLoadData)),
+      data: (playlist) {
+
+        return Scaffold(
+          appBar: AppBar(
+            title: Text(localizations.playlistTitle),
+            actions: [
+              IconButton(
+                onPressed: () {
+                  showPlaylistListBottomSheet(
+                    context: context, 
+                    playlist: playlist, 
+                    onDelete: () {
+                      provider.deletePlaylist(playlistId);
+                      Navigator.pop(context);
+                    }
+                  );
+                },
+                icon: Icon(Icons.more_vert)
+              ),
+            ],
+          ),
+          body: MiniPlayerTile(
+            child: RefreshIndicator(
+              onRefresh: () async {
+                ref.invalidate(playlistPageProvider);
+                ref.read(videoListProvider(query).notifier).refresh();
+              },
+              child: CustomScrollView(
+                slivers: [
+                    
+                  SliverToBoxAdapter(
+                    child: ListTile(
+                      title: Text(playlist!.playlistName),
+                      leading: AspectRatio(
+                        aspectRatio: 1 / 1,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: CustomNetworkImage(imageLink: playlist.playlistPic)
+                        ),
+                      ),
+                      trailing: playlist.playlistType == "regular" && UserSession.isPrivileged
+                        ? playlist.playlistSubscribed
+                            ? FilledButton(
+                                onPressed: () {
+                                  ConfirmationDialog(
+                                    context: context, 
+                                    onSure: () {
+                                      provider.subscribe(false);
+                                    }
+                                  ); 
+                                },
+                                child: Text(localizations.playerUnsubscribe),
+                              )
+                            : OutlinedButton(
+                                onPressed: () {
+                                  provider.subscribe(true);
+                                },
+                                child: Text(localizations.playerSubscribe),
+                              )
+                        : null
+                    ),
+                  ),
+                  
+                  SliverToBoxAdapter(
+                    child: SizedBox(height: 20),
+                  ),
+
+                  VideoListSection(
+                    title: localizations.playlistVideos, 
+                    query: query, 
+                    showSorting: false,
+                    hideChannel: false, 
+                    playlistId: playlistId,
+                    playlistType: playlist.playlistType,
+                  ),
+                ] 
+              )
+            )
+          )
+        );
+      }
+    );
+  }
+}
+
